@@ -1,5 +1,15 @@
 <?php
 session_start();
+
+// Enable error reporting untuk debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Cek apakah functions.php ada dan bisa di-load
+if (!file_exists('functions.php')) {
+    die("File functions.php tidak ditemukan!");
+}
+
 require 'functions.php';
 
 // Cek apakah user sudah login
@@ -9,48 +19,61 @@ if (!isset($_SESSION['login'])) {
 }
 
 $username = $_SESSION['username'];
-$user_type = $_SESSION['user_type'];
+$user_type = $_SESSION['user_type'] ?? 'warga'; // Default ke warga jika tidak ada
 
-// Query untuk mendapatkan data retribusi
-$query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga, w.alamat 
-          FROM retribusi r 
-          LEFT JOIN users u ON r.petugas_id = u.id 
-          LEFT JOIN warga w ON r.warga_id = w.id 
-          ORDER BY r.tanggal DESC";
-$retribusi = query($query);
-
-// Hitung total retribusi
-$total_query = "SELECT SUM(jumlah) as total_retribusi FROM retribusi WHERE status = 'lunas'";
-$total_result = query($total_query);
-$total_retribusi = $total_result[0]['total_retribusi'] ?? 0;
-
-// Format total retribusi
-$total_retribusi_formatted = "Rp " . number_format($total_retribusi, 0, ',', '.');
-
-// Handle pencarian
+// Inisialisasi variabel
+$retribusi = [];
+$total_retribusi = 0;
+$total_retribusi_formatted = "Rp 0";
 $keyword = '';
-if (isset($_GET['search']) && !empty($_GET['keyword'])) {
-    $keyword = $_GET['keyword'];
-    $search_query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga, w.alamat 
-                    FROM retribusi r 
-                    LEFT JOIN users u ON r.petugas_id = u.id 
-                    LEFT JOIN warga w ON r.warga_id = w.id 
-                    WHERE w.nama LIKE '%$keyword%' OR w.alamat LIKE '%$keyword%' OR r.bulan LIKE '%$keyword%'
-                    ORDER BY r.tanggal DESC";
-    $retribusi = query($search_query);
+
+try {
+    // Query untuk mendapatkan data retribusi - SESUAIKAN DENGAN STRUCTURE DATABASE
+    $query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga 
+              FROM retribusi r 
+              LEFT JOIN users u ON r.id_petugas = u.id 
+              LEFT JOIN warga w ON r.id_warga = w.id 
+              ORDER BY r.created_at DESC";
+    
+    $retribusi = query($query);
+
+    // Hitung total retribusi
+    $total_query = "SELECT SUM(jumlah) as total_retribusi FROM retribusi WHERE status = 'lunas'";
+    $total_result = query($total_query);
+    $total_retribusi = $total_result[0]['total_retribusi'] ?? 0;
+
+    // Format total retribusi
+    $total_retribusi_formatted = "Rp " . number_format($total_retribusi, 0, ',', '.');
+
+    // Handle pencarian
+    if (isset($_GET['search']) && !empty($_GET['keyword'])) {
+        $keyword = $_GET['keyword'];
+        $search_query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga 
+                        FROM retribusi r 
+                        LEFT JOIN users u ON r.id_petugas = u.id 
+                        LEFT JOIN warga w ON r.id_warga = w.id 
+                        WHERE w.nama LIKE '%$keyword%' OR r.bulan_tahun LIKE '%$keyword%'
+                        ORDER BY r.created_at DESC";
+        $retribusi = query($search_query);
+    }
+
+    // Handle filter bulan
+    if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
+        $bulan = $_GET['bulan'];
+        $filter_query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga 
+                        FROM retribusi r 
+                        LEFT JOIN users u ON r.id_petugas = u.id 
+                        LEFT JOIN warga w ON r.id_warga = w.id 
+                        WHERE r.bulan_tahun LIKE '%$bulan%'
+                        ORDER BY r.created_at DESC";
+        $retribusi = query($filter_query);
+    }
+} catch (Exception $e) {
+    // Tangani error dengan graceful degradation
+    error_log("Error in retribusi.php: " . $e->getMessage());
+    $error_message = "Terjadi kesalahan dalam memuat data. Silakan coba lagi.";
 }
 
-// Handle filter bulan
-if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
-    $bulan = $_GET['bulan'];
-    $filter_query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga, w.alamat 
-                    FROM retribusi r 
-                    LEFT JOIN users u ON r.petugas_id = u.id 
-                    LEFT JOIN warga w ON r.warga_id = w.id 
-                    WHERE r.bulan = '$bulan'
-                    ORDER BY r.tanggal DESC";
-    $retribusi = query($filter_query);
-}
 ?>
 
 <!DOCTYPE html>
@@ -70,7 +93,7 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
 
         .retribusi-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 30px;
             flex-wrap: wrap;
@@ -130,10 +153,12 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             display: flex;
             gap: 10px;
             margin-bottom: 15px;
+            flex-wrap: wrap;
         }
 
         .search-input {
             flex: 1;
+            min-width: 250px;
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 5px;
@@ -144,6 +169,7 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             display: flex;
             gap: 10px;
             align-items: center;
+            flex-wrap: wrap;
         }
 
         .filter-select {
@@ -151,6 +177,7 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             border: 1px solid #ddd;
             border-radius: 5px;
             font-size: 14px;
+            min-width: 150px;
         }
 
         .btn {
@@ -160,6 +187,9 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             cursor: pointer;
             font-size: 14px;
             transition: background-color 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
         }
 
         .btn-primary {
@@ -178,6 +208,15 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
 
         .btn-success:hover {
             background-color: #219a52;
+        }
+
+        .btn-secondary {
+            background-color: #95a5a6;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #7f8c8d;
         }
 
         .retribusi-table {
@@ -215,6 +254,7 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             padding: 5px 10px;
             border-radius: 15px;
             font-size: 0.8em;
+            display: inline-block;
         }
 
         .status-tunggak {
@@ -223,6 +263,7 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             padding: 5px 10px;
             border-radius: 15px;
             font-size: 0.8em;
+            display: inline-block;
         }
 
         .action-buttons {
@@ -265,6 +306,15 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             color: #bdc3c7;
         }
 
+        .error-message {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #e74c3c;
+        }
+
         @media (max-width: 768px) {
             .retribusi-header {
                 flex-direction: column;
@@ -275,6 +325,10 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
                 flex-direction: column;
             }
             
+            .search-input {
+                min-width: auto;
+            }
+            
             .table {
                 font-size: 0.9em;
             }
@@ -282,13 +336,32 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             .table th, .table td {
                 padding: 10px 5px;
             }
+            
+            .action-buttons {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
 <body>
-    <?php include 'templates/header.php'; ?>
+    <?php 
+    // Cek apakah file header ada
+    if (file_exists('templates/header.php')) {
+        include 'templates/header.php'; 
+    } else {
+        echo "<header style='background:#34495e;color:white;padding:1rem;'><h1>SampahKita - Data Retribusi</h1></header>";
+    }
+    ?>
 
     <div class="retribusi-container">
+        <!-- Error Message -->
+        <?php if (isset($error_message)): ?>
+        <div class="error-message">
+            <i class="fas fa-exclamation-triangle"></i>
+            <?= $error_message ?>
+        </div>
+        <?php endif; ?>
+
         <div class="retribusi-header">
             <h1 class="retribusi-title">
                 <i class="fas fa-money-bill-wave"></i>
@@ -315,7 +388,7 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
                 <small>Data retribusi</small>
             </div>
             <div class="stat-card pending">
-                <div class="stat-label">Rata-rata per Bulan</div>
+                <div class="stat-label">Rata-rata per Transaksi</div>
                 <div class="stat-number">
                     Rp <?= count($retribusi) > 0 ? number_format($total_retribusi / count($retribusi), 0, ',', '.') : 0 ?>
                 </div>
@@ -326,12 +399,12 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
         <!-- Pencarian dan Filter -->
         <div class="search-filter">
             <form method="GET" class="search-form">
-                <input type="text" name="keyword" class="search-input" placeholder="Cari berdasarkan nama warga, alamat, atau bulan..." value="<?= htmlspecialchars($keyword) ?>">
+                <input type="text" name="keyword" class="search-input" placeholder="Cari berdasarkan nama warga atau bulan..." value="<?= htmlspecialchars($keyword) ?>">
                 <button type="submit" name="search" class="btn btn-primary">
                     <i class="fas fa-search"></i> Cari
                 </button>
                 <?php if (!empty($keyword)): ?>
-                <a href="retribusi.php" class="btn" style="background-color: #95a5a6; color: white;">
+                <a href="retribusi.php" class="btn btn-secondary">
                     <i class="fas fa-times"></i> Reset
                 </a>
                 <?php endif; ?>
@@ -340,24 +413,24 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
             <form method="GET" class="filter-form">
                 <select name="bulan" class="filter-select">
                     <option value="">Pilih Bulan</option>
-                    <option value="Januari">Januari</option>
-                    <option value="Februari">Februari</option>
-                    <option value="Maret">Maret</option>
-                    <option value="April">April</option>
-                    <option value="Mei">Mei</option>
-                    <option value="Juni">Juni</option>
-                    <option value="Juli">Juli</option>
-                    <option value="Agustus">Agustus</option>
-                    <option value="September">September</option>
-                    <option value="Oktober">Oktober</option>
-                    <option value="November">November</option>
-                    <option value="Desember">Desember</option>
+                    <option value="01">Januari</option>
+                    <option value="02">Februari</option>
+                    <option value="03">Maret</option>
+                    <option value="04">April</option>
+                    <option value="05">Mei</option>
+                    <option value="06">Juni</option>
+                    <option value="07">Juli</option>
+                    <option value="08">Agustus</option>
+                    <option value="09">September</option>
+                    <option value="10">Oktober</option>
+                    <option value="11">November</option>
+                    <option value="12">Desember</option>
                 </select>
                 <button type="submit" name="filter_bulan" class="btn btn-primary">
                     <i class="fas fa-filter"></i> Filter
                 </button>
                 <?php if (isset($_GET['filter_bulan'])): ?>
-                <a href="retribusi.php" class="btn" style="background-color: #95a5a6; color: white;">
+                <a href="retribusi.php" class="btn btn-secondary">
                     <i class="fas fa-times"></i> Reset Filter
                 </a>
                 <?php endif; ?>
@@ -371,10 +444,9 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
                 <thead>
                     <tr>
                         <th>No</th>
-                        <th>Tanggal</th>
+                        <th>Tanggal Input</th>
                         <th>Nama Warga</th>
-                        <th>Alamat</th>
-                        <th>Bulan</th>
+                        <th>Bulan Tahun</th>
                         <th>Jumlah</th>
                         <th>Status</th>
                         <th>Petugas</th>
@@ -388,10 +460,9 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
                     <?php foreach ($retribusi as $row): ?>
                     <tr>
                         <td><?= $i ?></td>
-                        <td><?= date('d/m/Y', strtotime($row['tanggal'])) ?></td>
-                        <td><?= htmlspecialchars($row['nama_warga']) ?></td>
-                        <td><?= htmlspecialchars($row['alamat']) ?></td>
-                        <td><?= htmlspecialchars($row['bulan']) ?></td>
+                        <td><?= date('d/m/Y', strtotime($row['created_at'])) ?></td>
+                        <td><?= htmlspecialchars($row['nama_warga'] ?? '-') ?></td>
+                        <td><?= htmlspecialchars($row['bulan_tahun']) ?></td>
                         <td>Rp <?= number_format($row['jumlah'], 0, ',', '.') ?></td>
                         <td>
                             <span class="status-<?= $row['status'] === 'lunas' ? 'lunas' : 'tunggak' ?>">
@@ -430,7 +501,14 @@ if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
         </div>
     </div>
 
-    <?php include 'templates/footer.php'; ?>
+    <?php 
+    // Cek apakah file footer ada
+    if (file_exists('templates/footer.php')) {
+        include 'templates/footer.php'; 
+    } else {
+        echo "<footer style='background:#34495e;color:white;padding:1rem;text-align:center;'>SampahKita &copy; " . date('Y') . "</footer>";
+    }
+    ?>
 
     <script>
         // Highlight filter yang aktif
