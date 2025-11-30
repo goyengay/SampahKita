@@ -1,77 +1,53 @@
 <?php
-session_start();
-
-// Enable error reporting untuk debugging
-error_reporting(E_ALL);
+// ERROR REPORTING
 ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
-// Cek apakah functions.php ada dan bisa di-load
-if (!file_exists('functions.php')) {
-    die("File functions.php tidak ditemukan!");
-}
+include 'auth.php';
+$auth = new Auth();
+$auth->redirectIfNotLoggedIn();
 
-require 'functions.php';
-
-// Cek apakah user sudah login
-if (!isset($_SESSION['login'])) {
-    header("Location: login.php");
+// Pastikan hanya role Masyarakat yang dapat mengakses halaman ini
+if ($_SESSION['role'] != 'masyarakat') {
+    header("Location: dashboard.php");
     exit;
 }
 
-$username = $_SESSION['username'];
-$user_type = $_SESSION['user_type'] ?? 'warga'; // Default ke warga jika tidak ada
+include 'config.php';
+$db = new Database();
+$conn = $db->getConnection();
 
-// Inisialisasi variabel
-$retribusi = [];
-$total_retribusi = 0;
-$total_retribusi_formatted = "Rp 0";
-$keyword = '';
+$current_page = basename($_SERVER['PHP_SELF']);
+$user_id = $_SESSION['user_id'];
+$message = '';
+$message_type = '';
 
-try {
-    // Query untuk mendapatkan data retribusi - SESUAIKAN DENGAN STRUCTURE DATABASE
-    $query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga 
-              FROM retribusi r 
-              LEFT JOIN users u ON r.id_petugas = u.id 
-              LEFT JOIN warga w ON r.id_warga = w.id 
-              ORDER BY r.created_at DESC";
-    
-    $retribusi = query($query);
+// --- LOGIKA UTAMA ---
 
-    // Hitung total retribusi
-    $total_query = "SELECT SUM(jumlah) as total_retribusi FROM retribusi WHERE status = 'lunas'";
-    $total_result = query($total_query);
-    $total_retribusi = $total_result[0]['total_retribusi'] ?? 0;
+// 1. Ambil Riwayat Retribusi Warga
+$query_retribusi = "SELECT * FROM retribusi WHERE id_warga = :id_warga ORDER BY bulan_tahun DESC";
+$stmt = $conn->prepare($query_retribusi);
+$stmt->bindParam(":id_warga", $user_id);
+$stmt->execute();
+$retribusi_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Format total retribusi
-    $total_retribusi_formatted = "Rp " . number_format($total_retribusi, 0, ',', '.');
+// 2. Ambil Statistik Ringkasan (Opsional, untuk tampilan Dashboard Warga)
+$query_summary = "
+    SELECT 
+        COUNT(CASE WHEN status = 'belum bayar' THEN 1 END) as total_belum_bayar,
+        COALESCE(SUM(CASE WHEN status = 'belum bayar' THEN jumlah ELSE 0 END), 0) as total_nominal_belum_bayar,
+        COUNT(CASE WHEN status = 'lunas' THEN 1 END) as total_lunas
+    FROM retribusi 
+    WHERE id_warga = :id_warga";
+$stmt_summary = $conn->prepare($query_summary);
+$stmt_summary->bindParam(":id_warga", $user_id);
+$stmt_summary->execute();
+$summary = $stmt_summary->fetch(PDO::FETCH_ASSOC);
 
-    // Handle pencarian
-    if (isset($_GET['search']) && !empty($_GET['keyword'])) {
-        $keyword = $_GET['keyword'];
-        $search_query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga 
-                        FROM retribusi r 
-                        LEFT JOIN users u ON r.id_petugas = u.id 
-                        LEFT JOIN warga w ON r.id_warga = w.id 
-                        WHERE w.nama LIKE '%$keyword%' OR r.bulan_tahun LIKE '%$keyword%'
-                        ORDER BY r.created_at DESC";
-        $retribusi = query($search_query);
-    }
-
-    // Handle filter bulan
-    if (isset($_GET['filter_bulan']) && !empty($_GET['bulan'])) {
-        $bulan = $_GET['bulan'];
-        $filter_query = "SELECT r.*, u.nama as nama_petugas, w.nama as nama_warga 
-                        FROM retribusi r 
-                        LEFT JOIN users u ON r.id_petugas = u.id 
-                        LEFT JOIN warga w ON r.id_warga = w.id 
-                        WHERE r.bulan_tahun LIKE '%$bulan%'
-                        ORDER BY r.created_at DESC";
-        $retribusi = query($filter_query);
-    }
-} catch (Exception $e) {
-    // Tangani error dengan graceful degradation
-    error_log("Error in retribusi.php: " . $e->getMessage());
-    $error_message = "Terjadi kesalahan dalam memuat data. Silakan coba lagi.";
+// Helper function to format currency
+function formatRupiah($amount) {
+    return 'Rp ' . number_format($amount, 0, ',', '.');
 }
 
 ?>
@@ -81,452 +57,192 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Retribusi - SampahKita</title>
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <title>Retribusi Sampah - Sistem Pengelolaan Sampah</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .retribusi-container {
-            max-width: 1200px;
-            margin: 20px auto;
-            padding: 20px;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .navbar { background: linear-gradient(90deg, #1e7e34 0%, #2d9f3d 100%) !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
+        .navbar-brand { font-weight: bold; font-size: 1.4rem; letter-spacing: 1px; }
+        .sidebar { background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); overflow: hidden; position: sticky; top: 20px; }
+        .list-group-item { border: none; border-left: 4px solid transparent; transition: all 0.3s ease; font-weight: 500; color: #333; }
+        .list-group-item:hover { background-color: #f8f9fa; border-left-color: #1e7e34; padding-left: 1.5rem; }
+        .list-group-item.active { background: linear-gradient(90deg, #1e7e34 0%, #2d9f3d 100%); border-left-color: #fff; color: white; }
+        .page-title { font-size: 1.8rem; font-weight: bold; color: #1e7e34; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
+        .page-title i { font-size: 2rem; }
+        .container-main { padding: 30px 0; }
+        .content-card { background: white; border-radius: 15px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); margin-bottom: 25px; overflow: hidden; }
+        .card-header { background: linear-gradient(90deg, #1e7e34 0%, #2d9f3d 100%); color: white; padding: 20px; border: none; }
+        .card-header h5 { margin: 0; font-weight: 600; font-size: 1.1rem; }
+        .table thead th { border: none; font-weight: 600; color: #1e7e34; border-bottom: 2px solid #dee2e6; }
+        .table tbody tr:hover { background-color: #f8f9fa; }
 
-        .retribusi-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
-            gap: 20px;
-        }
-
-        .retribusi-title {
-            color: #2c3e50;
-            margin: 0;
-        }
-
-        .retribusi-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: white;
-            padding: 25px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            text-align: center;
-            border-left: 4px solid #27ae60;
-        }
-
-        .stat-card.total {
-            border-left-color: #e74c3c;
-        }
-
-        .stat-card.pending {
-            border-left-color: #f39c12;
-        }
-
-        .stat-number {
-            font-size: 2em;
-            font-weight: bold;
-            color: #2c3e50;
-            margin: 10px 0;
-        }
-
-        .stat-label {
-            color: #7f8c8d;
-            font-size: 0.9em;
-        }
-
-        .search-filter {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-
-        .search-form {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-
-        .search-input {
-            flex: 1;
-            min-width: 250px;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-
-        .filter-form {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .filter-select {
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
-            min-width: 150px;
-        }
-
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.3s;
-            text-decoration: none;
-            display: inline-block;
-            text-align: center;
-        }
-
-        .btn-primary {
-            background-color: #3498db;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background-color: #2980b9;
-        }
-
-        .btn-success {
-            background-color: #27ae60;
-            color: white;
-        }
-
-        .btn-success:hover {
-            background-color: #219a52;
-        }
-
-        .btn-secondary {
-            background-color: #95a5a6;
-            color: white;
-        }
-
-        .btn-secondary:hover {
-            background-color: #7f8c8d;
-        }
-
-        .retribusi-table {
-            background: white;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .table th,
-        .table td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #ecf0f1;
-        }
-
-        .table th {
-            background-color: #34495e;
-            color: white;
-            font-weight: 600;
-        }
-
-        .table tr:hover {
-            background-color: #f8f9fa;
-        }
-
-        .status-lunas {
-            background-color: #d4edda;
-            color: #155724;
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 0.8em;
-            display: inline-block;
-        }
-
-        .status-tunggak {
-            background-color: #f8d7da;
-            color: #721c24;
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 0.8em;
-            display: inline-block;
-        }
-
-        .action-buttons {
-            display: flex;
-            gap: 5px;
-        }
-
-        .btn-sm {
-            padding: 5px 10px;
-            font-size: 12px;
-        }
-
-        .btn-edit {
-            background-color: #f39c12;
-            color: white;
-        }
-
-        .btn-edit:hover {
-            background-color: #e67e22;
-        }
-
-        .btn-delete {
-            background-color: #e74c3c;
-            color: white;
-        }
-
-        .btn-delete:hover {
-            background-color: #c0392b;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: #7f8c8d;
-        }
-
-        .empty-state i {
-            font-size: 3em;
-            margin-bottom: 10px;
-            color: #bdc3c7;
-        }
-
-        .error-message {
-            background-color: #f8d7da;
-            color: #721c24;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            border-left: 4px solid #e74c3c;
-        }
-
-        @media (max-width: 768px) {
-            .retribusi-header {
-                flex-direction: column;
-                align-items: stretch;
-            }
-            
-            .search-form, .filter-form {
-                flex-direction: column;
-            }
-            
-            .search-input {
-                min-width: auto;
-            }
-            
-            .table {
-                font-size: 0.9em;
-            }
-            
-            .table th, .table td {
-                padding: 10px 5px;
-            }
-            
-            .action-buttons {
-                flex-direction: column;
-            }
-        }
+        .stat-card-danger { background: linear-gradient(135deg, #dc3545 0%, #ff6b6b 100%); color: white; border-radius: 15px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); }
+        .stat-card-success { background: linear-gradient(135deg, #198754 0%, #2d9f3d 100%); color: white; border-radius: 15px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); }
+        .stat-number { font-size: 2.0rem; font-weight: bold; }
+        .stat-label { font-size: 0.9rem; opacity: 0.9; }
+        .badge-lunas { background-color: #198754; color: white; }
+        .badge-belum-bayar { background-color: #dc3545; color: white; }
     </style>
 </head>
 <body>
-    <?php 
-    // Cek apakah file header ada
-    if (file_exists('templates/header.php')) {
-        include 'templates/header.php'; 
-    } else {
-        echo "<header style='background:#34495e;color:white;padding:1rem;'><h1>SampahKita - Data Retribusi</h1></header>";
-    }
-    ?>
-
-    <div class="retribusi-container">
-        <!-- Error Message -->
-        <?php if (isset($error_message)): ?>
-        <div class="error-message">
-            <i class="fas fa-exclamation-triangle"></i>
-            <?= $error_message ?>
-        </div>
-        <?php endif; ?>
-
-        <div class="retribusi-header">
-            <h1 class="retribusi-title">
-                <i class="fas fa-money-bill-wave"></i>
-                Data Retribusi Sampah
-            </h1>
-            <?php if ($user_type === 'admin' || $user_type === 'petugas'): ?>
-            <a href="tambah_retribusi.php" class="btn btn-success">
-                <i class="fas fa-plus"></i>
-                Tambah Retribusi
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="dashboard.php">
+                <i class="fas fa-trash-alt"></i> SAMPAH KITA
             </a>
-            <?php endif; ?>
-        </div>
-
-        <!-- Statistik -->
-        <div class="retribusi-stats">
-            <div class="stat-card">
-                <div class="stat-label">Total Retribusi</div>
-                <div class="stat-number"><?= $total_retribusi_formatted ?></div>
-                <small>Seluruh periode</small>
-            </div>
-            <div class="stat-card total">
-                <div class="stat-label">Total Transaksi</div>
-                <div class="stat-number"><?= count($retribusi) ?></div>
-                <small>Data retribusi</small>
-            </div>
-            <div class="stat-card pending">
-                <div class="stat-label">Rata-rata per Transaksi</div>
-                <div class="stat-number">
-                    Rp <?= count($retribusi) > 0 ? number_format($total_retribusi / count($retribusi), 0, ',', '.') : 0 ?>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <div class="navbar-nav ms-auto">
+                    <span class="navbar-text me-3" style="color: white; font-weight: 500;">
+                        <i class="fas fa-user-circle"></i> <?php echo $_SESSION['nama_lengkap']; ?>
+                    </span>
+                    <a href="logout.php" class="btn btn-outline-light btn-sm">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </a>
                 </div>
-                <small>Per transaksi</small>
             </div>
         </div>
+    </nav>
 
-        <!-- Pencarian dan Filter -->
-        <div class="search-filter">
-            <form method="GET" class="search-form">
-                <input type="text" name="keyword" class="search-input" placeholder="Cari berdasarkan nama warga atau bulan..." value="<?= htmlspecialchars($keyword) ?>">
-                <button type="submit" name="search" class="btn btn-primary">
-                    <i class="fas fa-search"></i> Cari
-                </button>
-                <?php if (!empty($keyword)): ?>
-                <a href="retribusi.php" class="btn btn-secondary">
-                    <i class="fas fa-times"></i> Reset
-                </a>
-                <?php endif; ?>
-            </form>
-
-            <form method="GET" class="filter-form">
-                <select name="bulan" class="filter-select">
-                    <option value="">Pilih Bulan</option>
-                    <option value="01">Januari</option>
-                    <option value="02">Februari</option>
-                    <option value="03">Maret</option>
-                    <option value="04">April</option>
-                    <option value="05">Mei</option>
-                    <option value="06">Juni</option>
-                    <option value="07">Juli</option>
-                    <option value="08">Agustus</option>
-                    <option value="09">September</option>
-                    <option value="10">Oktober</option>
-                    <option value="11">November</option>
-                    <option value="12">Desember</option>
-                </select>
-                <button type="submit" name="filter_bulan" class="btn btn-primary">
-                    <i class="fas fa-filter"></i> Filter
-                </button>
-                <?php if (isset($_GET['filter_bulan'])): ?>
-                <a href="retribusi.php" class="btn btn-secondary">
-                    <i class="fas fa-times"></i> Reset Filter
-                </a>
-                <?php endif; ?>
-            </form>
-        </div>
-
-        <!-- Tabel Data Retribusi -->
-        <div class="retribusi-table">
-            <?php if (count($retribusi) > 0): ?>
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>No</th>
-                        <th>Tanggal Input</th>
-                        <th>Nama Warga</th>
-                        <th>Bulan Tahun</th>
-                        <th>Jumlah</th>
-                        <th>Status</th>
-                        <th>Petugas</th>
-                        <?php if ($user_type === 'admin' || $user_type === 'petugas'): ?>
-                        <th>Aksi</th>
-                        <?php endif; ?>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php $i = 1; ?>
-                    <?php foreach ($retribusi as $row): ?>
-                    <tr>
-                        <td><?= $i ?></td>
-                        <td><?= date('d/m/Y', strtotime($row['created_at'])) ?></td>
-                        <td><?= htmlspecialchars($row['nama_warga'] ?? '-') ?></td>
-                        <td><?= htmlspecialchars($row['bulan_tahun']) ?></td>
-                        <td>Rp <?= number_format($row['jumlah'], 0, ',', '.') ?></td>
-                        <td>
-                            <span class="status-<?= $row['status'] === 'lunas' ? 'lunas' : 'tunggak' ?>">
-                                <?= ucfirst($row['status']) ?>
-                            </span>
-                        </td>
-                        <td><?= htmlspecialchars($row['nama_petugas'] ?? '-') ?></td>
-                        <?php if ($user_type === 'admin' || $user_type === 'petugas'): ?>
-                        <td class="action-buttons">
-                            <a href="edit_retribusi.php?id=<?= $row['id'] ?>" class="btn btn-edit btn-sm">
-                                <i class="fas fa-edit"></i>
-                            </a>
-                            <a href="hapus_retribusi.php?id=<?= $row['id'] ?>" class="btn btn-delete btn-sm" onclick="return confirm('Yakin ingin menghapus data retribusi ini?')">
-                                <i class="fas fa-trash"></i>
-                            </a>
-                        </td>
-                        <?php endif; ?>
-                    </tr>
-                    <?php $i++; ?>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-            <?php else: ?>
-            <div class="empty-state">
-                <i class="fas fa-receipt"></i>
-                <h3>Tidak ada data retribusi</h3>
-                <p>Data retribusi sampah belum tersedia.</p>
-                <?php if ($user_type === 'admin' || $user_type === 'petugas'): ?>
-                <a href="tambah_retribusi.php" class="btn btn-success">
-                    <i class="fas fa-plus"></i>
-                    Tambah Retribusi Pertama
-                </a>
-                <?php endif; ?>
+    <div class="container container-main">
+        <div class="row">
+            <div class="col-lg-3 col-md-4">
+                <div class="sidebar list-group">
+                    <a href="dashboard.php" class="list-group-item list-group-item-action <?php echo ($current_page == 'dashboard.php') ? 'active' : ''; ?>">
+                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                    </a>
+                    <?php if ($_SESSION['role'] == 'masyarakat'): ?>
+                        <a href="laporan.php" class="list-group-item list-group-item-action <?php echo ($current_page == 'laporan.php') ? 'active' : ''; ?>">
+                            <i class="fas fa-plus-circle"></i> Buat Laporan
+                        </a>
+                        <a href="jadwal.php" class="list-group-item list-group-item-action <?php echo ($current_page == 'jadwal.php') ? 'active' : ''; ?>">
+                            <i class="fas fa-calendar-alt"></i> Jadwal Pengangkutan
+                        </a>
+                        <a href="retribusi.php" class="list-group-item list-group-item-action <?php echo ($current_page == 'retribusi.php') ? 'active' : ''; ?>">
+                            <i class="fas fa-money-bill"></i> Retribusi Sampah
+                        </a>
+                    <?php endif; ?>
+                    </div>
             </div>
-            <?php endif; ?>
+
+            <div class="col-lg-9 col-md-8">
+                <div class="page-title">
+                    <i class="fas fa-money-bill"></i> Retribusi Sampah
+                </div>
+
+                <?php if (!empty($message)): ?>
+                    <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
+                        <?php echo $message; ?>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                <?php endif; ?>
+
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="card stat-card-danger p-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="stat-number"><?php echo formatRupiah($summary['total_nominal_belum_bayar']); ?></div>
+                                    <div class="stat-label">Total Tunggakan (<?php echo $summary['total_belum_bayar']; ?> Bulan)</div>
+                                </div>
+                                <i class="fas fa-exclamation-triangle stat-icon" style="font-size: 2.5rem; opacity: 0.5;"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card stat-card-success p-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="stat-number"><?php echo $summary['total_lunas']; ?></div>
+                                    <div class="stat-label">Total Pembayaran Lunas</div>
+                                </div>
+                                <i class="fas fa-check-circle stat-icon" style="font-size: 2.5rem; opacity: 0.5;"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-table"></i> Riwayat Tagihan Retribusi</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>#ID</th>
+                                        <th>Bulan/Tahun</th>
+                                        <th>Jumlah (Rp)</th>
+                                        <th>Status</th>
+                                        <th>Tanggal Dicatat</th>
+                                        <th>Keterangan</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php
+                                    if (count($retribusi_list) > 0) {
+                                        foreach ($retribusi_list as $row) {
+                                            // Format Bulan/Tahun
+                                            $bulan_tahun = date('F Y', strtotime($row['bulan_tahun'] . '-01'));
+                                            
+                                            // Status Badge
+                                            if ($row['status'] == 'lunas') {
+                                                $badge = "<span class='badge badge-lunas'><i class='fas fa-check'></i> Lunas</span>";
+                                                $keterangan = "Pembayaran telah dicatat.";
+                                            } else {
+                                                $badge = "<span class='badge badge-belum-bayar'><i class='fas fa-times'></i> Belum Bayar</span>";
+                                                $keterangan = "<a href='#' class='text-danger' data-bs-toggle='modal' data-bs-target='#paymentModal'>Cara Bayar</a>";
+                                            }
+
+                                            echo "
+                                            <tr>
+                                                <td>{$row['id']}</td>
+                                                <td><strong>" . htmlspecialchars($bulan_tahun) . "</strong></td>
+                                                <td>" . formatRupiah($row['jumlah']) . "</td>
+                                                <td>{$badge}</td>
+                                                <td>" . date('d/m/Y', strtotime($row['created_at'])) . "</td>
+                                                <td>{$keterangan}</td>
+                                            </tr>";
+                                        }
+                                    } else {
+                                        echo "<tr><td colspan='6' class='text-center text-muted py-4'>Belum ada riwayat tagihan retribusi yang dicatat.</td></tr>";
+                                    }
+                                    ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
         </div>
     </div>
+    
+    <div class="modal fade" id="paymentModal" tabindex="-1" aria-labelledby="paymentModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-success text-white">
+            <h5 class="modal-title" id="paymentModalLabel"><i class="fas fa-info-circle"></i> Informasi Pembayaran</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p>Untuk saat ini, pembayaran retribusi sampah dilakukan melalui **koordinator RT/RW** setempat atau transfer ke rekening resmi:</p>
+            <blockquote class="blockquote">
+                <p class="mb-0">Bank XYZ: **123-456-789 (a/n Pengelola Sampah)**</p>
+                <footer class="blockquote-footer">Mohon konfirmasi pembayaran kepada petugas setelah transfer.</footer>
+            </blockquote>
+            <p class="text-danger">Aplikasi ini hanya berfungsi sebagai catatan riwayat tagihan Anda.</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
-    <?php 
-    // Cek apakah file footer ada
-    if (file_exists('templates/footer.php')) {
-        include 'templates/footer.php'; 
-    } else {
-        echo "<footer style='background:#34495e;color:white;padding:1rem;text-align:center;'>SampahKita &copy; " . date('Y') . "</footer>";
-    }
-    ?>
-
-    <script>
-        // Highlight filter yang aktif
-        const urlParams = new URLSearchParams(window.location.search);
-        const bulanFilter = urlParams.get('bulan');
-        if (bulanFilter) {
-            document.querySelector('select[name="bulan"]').value = bulanFilter;
-        }
-
-        // Konfirmasi sebelum menghapus
-        const deleteButtons = document.querySelectorAll('.btn-delete');
-        deleteButtons.forEach(button => {
-            button.addEventListener('click', function(e) {
-                if (!confirm('Yakin ingin menghapus data retribusi ini?')) {
-                    e.preventDefault();
-                }
-            });
-        });
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

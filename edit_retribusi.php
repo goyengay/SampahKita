@@ -2,188 +2,142 @@
 session_start();
 require 'functions.php';
 
-// Cek apakah user sudah login dan memiliki akses
-if (!isset($_SESSION['login']) || ($_SESSION['user_type'] !== 'admin' && $_SESSION['user_type'] !== 'petugas')) {
+if(!isset($_SESSION["login"]) || ($_SESSION['user_type'] != 'admin' && $_SESSION['user_type'] != 'petugas')) {
     header("Location: login.php");
     exit;
 }
 
-if (!isset($_GET['id'])) {
-    header("Location: retribusi.php");
-    exit;
-}
+$id = $_GET["id"];
+$retribusi = query("SELECT * FROM retribusi WHERE id = $id")[0];
 
-$id = $_GET['id'];
-$retribusi = getRetribusiById($id);
-
-if (!$retribusi) {
-    header("Location: retribusi.php");
-    exit;
-}
-
-$error = '';
-$success = '';
-
-// Handle form submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $data = [
-        'id_warga' => $_POST['id_warga'],
-        'bulan_tahun' => $_POST['bulan_tahun'],
-        'jumlah' => $_POST['jumlah'],
-        'status' => $_POST['status']
-    ];
-    
-    if (editRetribusi($id, $data)) {
-        $success = "Data retribusi berhasil diupdate!";
-        $retribusi = getRetribusiById($id); // Refresh data
+if(isset($_POST["submit"])) {
+    if(ubah_retribusi($_POST) > 0) {
+        echo "
+            <script>
+                alert('data berhasil diubah!');
+                document.location.href = 'retribusi.php';
+            </script>
+        ";
     } else {
-        $error = "Gagal mengupdate data retribusi!";
+        echo "
+            <script>
+                alert('data gagal diubah!');
+                document.location.href = 'retribusi.php';
+            </script>
+        ";
     }
 }
 
-// Ambil data warga untuk dropdown
-$warga = getWarga();
+$warga = query("SELECT * FROM warga ORDER BY nama");
 ?>
 
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit Retribusi - SampahKita</title>
+    <title>Ubah Data Retribusi</title>
     <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        .form-container {
+        .container {
             max-width: 600px;
             margin: 20px auto;
             padding: 20px;
+        }
+
+        .card {
             background: white;
+            padding: 30px;
             border-radius: 10px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        
+
         .form-group {
             margin-bottom: 20px;
         }
-        
-        .form-label {
+
+        label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
             color: #2c3e50;
         }
-        
-        .form-control {
+
+        input, select {
             width: 100%;
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 5px;
-            font-size: 14px;
+            font-size: 16px;
         }
-        
+
         .btn {
             padding: 10px 20px;
             border: none;
             border-radius: 5px;
             cursor: pointer;
-            font-size: 14px;
             text-decoration: none;
             display: inline-block;
             text-align: center;
         }
-        
-        .btn-success {
-            background-color: #27ae60;
+
+        .btn-warning {
+            background: #f39c12;
             color: white;
         }
-        
+
         .btn-secondary {
-            background-color: #95a5a6;
+            background: #95a5a6;
             color: white;
-        }
-        
-        .alert {
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-        
-        .alert-success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .alert-error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
         }
     </style>
 </head>
 <body>
     <?php include 'templates/header.php'; ?>
 
-    <div class="form-container">
-        <h1 style="color: #2c3e50; margin-bottom: 20px;">
-            <i class="fas fa-edit"></i> Edit Data Retribusi
-        </h1>
+    <div class="container">
+        <div class="card">
+            <h1 style="margin-bottom: 20px;">Ubah Data Retribusi</h1>
 
-        <?php if ($success): ?>
-            <div class="alert alert-success">
-                <i class="fas fa-check-circle"></i> <?= $success ?>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($error): ?>
-            <div class="alert alert-error">
-                <i class="fas fa-exclamation-triangle"></i> <?= $error ?>
-            </div>
-        <?php endif; ?>
-
-        <form method="POST" action="">
-            <div class="form-group">
-                <label class="form-label" for="id_warga">Nama Warga</label>
-                <select class="form-control" id="id_warga" name="id_warga" required>
-                    <option value="">Pilih Warga</option>
-                    <?php foreach ($warga as $w): ?>
-                        <option value="<?= $w['id'] ?>" <?= $w['id'] == $retribusi['id_warga'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($w['nama']) ?>
+            <form action="" method="post">
+                <input type="hidden" name="id" value="<?= $retribusi["id"]; ?>">
+                
+                <div class="form-group">
+                    <label for="id_warga">Nama Warga</label>
+                    <select name="id_warga" id="id_warga" required>
+                        <option value="">Pilih Warga</option>
+                        <?php foreach($warga as $w) : ?>
+                        <option value="<?= $w['id']; ?>" <?= $w['id'] == $retribusi['id_warga'] ? 'selected' : '' ?>>
+                            <?= $w['nama']; ?>
                         </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
 
-            <div class="form-group">
-                <label class="form-label" for="bulan_tahun">Bulan Tahun</label>
-                <input type="month" class="form-control" id="bulan_tahun" name="bulan_tahun" 
-                       value="<?= htmlspecialchars($retribusi['bulan_tahun']) ?>" required>
-            </div>
+                <div class="form-group">
+                    <label for="bulan_tahun">Bulan Tahun</label>
+                    <input type="month" name="bulan_tahun" id="bulan_tahun" value="<?= $retribusi['bulan_tahun']; ?>" required>
+                </div>
 
-            <div class="form-group">
-                <label class="form-label" for="jumlah">Jumlah Retribusi</label>
-                <input type="number" class="form-control" id="jumlah" name="jumlah" 
-                       value="<?= htmlspecialchars($retribusi['jumlah']) ?>" placeholder="Masukkan jumlah retribusi" required>
-            </div>
+                <div class="form-group">
+                    <label for="jumlah">Jumlah Retribusi</label>
+                    <input type="number" name="jumlah" id="jumlah" value="<?= $retribusi['jumlah']; ?>" required>
+                </div>
 
-            <div class="form-group">
-                <label class="form-label" for="status">Status Pembayaran</label>
-                <select class="form-control" id="status" name="status" required>
-                    <option value="lunas" <?= $retribusi['status'] == 'lunas' ? 'selected' : '' ?>>Lunas</option>
-                    <option value="tunggak" <?= $retribusi['status'] == 'tunggak' ? 'selected' : '' ?>>Tunggak</option>
-                </select>
-            </div>
+                <div class="form-group">
+                    <label for="status">Status</label>
+                    <select name="status" id="status" required>
+                        <option value="lunas" <?= $retribusi['status'] == 'lunas' ? 'selected' : '' ?>>Lunas</option>
+                        <option value="tunggak" <?= $retribusi['status'] == 'tunggak' ? 'selected' : '' ?>>Tunggak</option>
+                    </select>
+                </div>
 
-            <div style="display: flex; gap: 10px;">
-                <button type="submit" class="btn btn-success">
-                    <i class="fas fa-save"></i> Update
-                </button>
-                <a href="retribusi.php" class="btn btn-secondary">
-                    <i class="fas fa-arrow-left"></i> Kembali
-                </a>
-            </div>
-        </form>
+                <div style="display: flex; gap: 10px;">
+                    <button type="submit" name="submit" class="btn btn-warning">Ubah Data</button>
+                    <a href="retribusi.php" class="btn btn-secondary">Kembali</a>
+                </div>
+            </form>
+        </div>
     </div>
 
     <?php include 'templates/footer.php'; ?>

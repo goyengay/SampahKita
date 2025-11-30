@@ -70,6 +70,10 @@ if ($_POST && isset($_POST['username']) && isset($_POST['password'])) {
                             <input type="password" name="password" class="form-control" required value="password">
                         </div>
                         <button type="submit" class="btn btn-primary w-100">Login</button>
+                        <div class="text-center mt-3">
+                            <small> Belum punya akun? <a href="register.php">Daftar di sini</a></small>
+                        </div>
+                        
                     </form>
                     
                     <div class="text-center mt-3">

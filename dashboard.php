@@ -7,6 +7,8 @@ include 'config.php';
 $db = new Database();
 $conn = $db->getConnection();
 
+$current_page = basename($_SERVER['PHP_SELF']);
+
 // Get stats
 $query_laporan = "SELECT COUNT(*) as total FROM laporan_sampah";
 $stmt = $conn->prepare($query_laporan);
@@ -333,17 +335,23 @@ foreach ($weekly_data as $data) {
                         <a href="retribusi.php" class="list-group-item list-group-item-action">
                             <i class="fas fa-money-bill"></i> Retribusi Sampah
                         </a>
+                    <?php elseif ($_SESSION['role'] == 'petugas'): ?>
+                            <a href="jadwal.php" class="list-group-item list-group-item-action">
+                                <i class="fas fa-calendar-alt"></i> Jadwal Pengangkutan
+                            </a>
                     <?php elseif ($_SESSION['role'] == 'admin' || $_SESSION['role'] == 'petugas'): ?>
                         <a href="kelola_laporan.php" class="list-group-item list-group-item-action">
                             <i class="fas fa-list"></i> Kelola Laporan
                         </a>
-                        <a href="kelola_jadwal.php" class="list-group-item list-group-item-action">
-                            <i class="fas fa-calendar"></i> Kelola Jadwal
-                        </a>
+                        
+                    
+                           
                         <?php if ($_SESSION['role'] == 'admin'): ?>
                             <a href="kelola_user.php" class="list-group-item list-group-item-action">
                                 <i class="fas fa-users"></i> Kelola User
                             </a>
+                            <a href="kelola_jadwal.php" class="list-group-item list-group-item-action">
+                            <i class="fas fa-calendar"></i> Kelola Jadwal
                         <?php endif; ?>
                     <?php endif; ?>
                 </div>

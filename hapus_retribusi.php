@@ -2,26 +2,26 @@
 session_start();
 require 'functions.php';
 
-// Cek apakah user sudah login dan memiliki akses
-if (!isset($_SESSION['login']) || ($_SESSION['user_type'] !== 'admin' && $_SESSION['user_type'] !== 'petugas')) {
+if(!isset($_SESSION["login"]) || ($_SESSION['user_type'] != 'admin' && $_SESSION['user_type'] != 'petugas')) {
     header("Location: login.php");
     exit;
 }
 
-if (!isset($_GET['id'])) {
-    header("Location: retribusi.php");
-    exit;
-}
+$id = $_GET["id"];
 
-$id = $_GET['id'];
-
-// Hapus data
-if (hapusRetribusi($id)) {
-    $_SESSION['success'] = "Data retribusi berhasil dihapus!";
+if(hapus_retribusi($id) > 0) {
+    echo "
+        <script>
+            alert('data berhasil dihapus!');
+            document.location.href = 'retribusi.php';
+        </script>
+    ";
 } else {
-    $_SESSION['error'] = "Gagal menghapus data retribusi!";
+    echo "
+        <script>
+            alert('data gagal dihapus!');
+            document.location.href = 'retribusi.php';
+        </script>
+    ";
 }
-
-header("Location: retribusi.php");
-exit;
 ?>
